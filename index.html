@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>BTC Multi Address Checker PRO</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:12px;background:#fff;color:#222}
+.wrap{width:100%}
+.title{font-size:22px;font-family:Georgia,"Times New Roman",serif;margin:0 0 12px}
+.topbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+select,button{font-size:12px;padding:4px 8px}
+.status{font-size:12px;color:#444}
+.tablebox{border:1px solid #ddd;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:8px;border-bottom:1px solid #eee;white-space:nowrap;text-align:left}
+th{background:#f3f4f6;cursor:pointer}
+.addr{font-family:Consolas,monospace}
+.pager{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.pageinfo{font-size:12px;color:#444}
+.progress-wrap{width:100%;max-width:520px;height:12px;border:1px solid #ccc;background:#f4f4f4;overflow:hidden}
+.progress-bar{height:100%;width:0%;background:#4caf50}
+.small{font-size:11px;color:#666}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title">BTC Multi Address Checker PRO</div>
+
+  <div class="topbar">
+    <label for="viewSize">View</label>
+    <select id="viewSize">
+      <option value="10">10</option>
+      <option value="20">20</option>
+      <option value="30">30</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+    </select>
+
+    <button id="reloadBtn">Reload Page</button>
+    <div id="status" class="status">Starting...</div>
+  </div>
+
+  <div class="topbar">
+    <div class="progress-wrap"><div id="progressBar" class="progress-bar"></div></div>
+    <div id="progressText" class="status">0%</div>
+  </div>
+
+  <div id="summaryText" class="small">Preparing...</div>
+
+  <div class="tablebox">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortCurrentPage('addr')">Address</th>
+          <th onclick="sortCurrentPage('balNum')">Balance</th>
+          <th onclick="sortCurrentPage('tx')">Txs</th>
+          <th onclick="sortCurrentPage('dateNum')">Date</th>
+          <th>Type</th>
+          <th>Multisign</th>
+        </tr>
+      </thead>
+      <tbody id="body"></tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <button id="firstBtn" onclick="goFirst()">First</button>
+    <button id="prevBtn" onclick="goPrev()">Prev</button>
+    <button id="nextBtn" onclick="goNext()">Next</button>
+    <button id="lastBtn" onclick="goLast()">Last</button>
+    <span id="pageInfo" class="pageinfo"></span>
+  </div>
+</div>
+
+<script>
+const BACKEND_URL = "http://127.0.0.1:8080";
+
+let totalRows = 0;
+let currentPage = 1;
+let pageSize = 50;
+let pageRows = [];
+let sortKey = "";
+let sortAsc = true;
+
+function escapeHtml(text){
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function updatePager(){
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  document.getElementById("pageInfo").textContent =
+    `Page ${currentPage} / ${totalPages} | View ${pageSize} | Total ${totalRows}`;
+
+  document.getElementById("firstBtn").disabled = currentPage <= 1;
+  document.getElementById("prevBtn").disabled = currentPage <= 1;
+  document.getElementById("nextBtn").disabled = currentPage >= totalPages;
+  document.getElementById("lastBtn").disabled = currentPage >= totalPages;
+}
+
+function renderTable(){
+  const body = document.getElementById("body");
+  body.innerHTML = "";
+
+  for (const r of pageRows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="addr">${escapeHtml(r.addr)}</td>
+      <td>${escapeHtml(String(r.bal))}</td>
+      <td>${escapeHtml(String(r.tx))}</td>
+      <td>${escapeHtml(String(r.date))}</td>
+      <td>${escapeHtml(r.type)}</td>
+      <td>${escapeHtml(r.multi)}</td>
+    `;
+    body.appendChild(tr);
+  }
+
+  updatePager();
+}
+
+function sortCurrentPage(key){
+  if (sortKey === key) sortAsc = !sortAsc;
+  else {
+    sortKey = key;
+    sortAsc = true;
+  }
+
+  pageRows.sort((a, b) => {
+    let av = a[key];
+    let bv = b[key];
+
+    if (key === "addr") {
+      av = String(av).toLowerCase();
+      bv = String(bv).toLowerCase();
+      return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
+
+    av = Number(av);
+    bv = Number(bv);
+    return sortAsc ? av - bv : bv - av;
+  });
+
+  renderTable();
+}
+
+async function loadMeta(){
+  const r = await fetch(`${BACKEND_URL}/api/meta`);
+  if (!r.ok) throw new Error("Cannot load meta");
+  return await r.json();
+}
+
+async function loadPage(){
+  const status = document.getElementById("status");
+  const summary = document.getElementById("summaryText");
+
+  pageSize = parseInt(document.getElementById("viewSize").value, 10) || 50;
+
+  status.textContent = `Loading page ${currentPage}...`;
+  document.getElementById("progressBar").style.width = "30%";
+  document.getElementById("progressText").textContent = "Loading...";
+
+  const r = await fetch(`${BACKEND_URL}/api/page?page=${currentPage}&size=${pageSize}`);
+  const j = await r.json();
+
+  if (!r.ok) {
+    throw new Error(j.error || "Cannot load page");
+  }
+
+  totalRows = j.total;
+  pageRows = j.rows;
+
+  renderTable();
+
+  document.getElementById("progressBar").style.width = "100%";
+  document.getElementById("progressText").textContent = "100%";
+  status.textContent = `Page ${currentPage} finished`;
+  summary.textContent = `Backend total addresses: ${totalRows}`;
+}
+
+async function reloadAll(){
+  try{
+    const meta = await loadMeta();
+    totalRows = meta.total;
+    document.getElementById("summaryText").textContent =
+      `Backend total addresses: ${meta.total} | Cache entries: ${meta.cacheSize}`;
+    await loadPage();
+  } catch (e) {
+    document.getElementById("status").textContent = e.message || String(e);
+  }
+}
+
+async function goFirst(){ if (currentPage !== 1) { currentPage = 1; await loadPage(); } }
+async function goPrev(){ if (currentPage > 1) { currentPage--; await loadPage(); } }
+async function goNext(){
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  if (currentPage < totalPages) { currentPage++; await loadPage(); }
+}
+async function goLast(){
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  if (currentPage !== totalPages) { currentPage = totalPages; await loadPage(); }
+}
+
+document.getElementById("viewSize").addEventListener("change", async () => {
+  currentPage = 1;
+  await loadPage();
+});
+
+document.getElementById("reloadBtn").addEventListener("click", reloadAll);
+
+reloadAll();
+</script>
+</body>
+</html>
